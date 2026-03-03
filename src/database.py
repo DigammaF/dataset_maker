@@ -31,6 +31,7 @@ class Database:
 	tables: dict[type[Entity], str] = field(default_factory=dict[type, str])
 	ids: dict[type[Entity], int] = field(default_factory=dict[type, int])
 	columns: dict[type[Entity], tuple[Column, ...]] = field(default_factory=dict[type, tuple])
+	instances: dict[type[Entity], dict[int, Entity]] = field(default_factory=dict[type, dict])
 
 	def __enter__(self):
 		global DATABASE
@@ -44,6 +45,9 @@ class Database:
 		global DATABASE
 		self.flush_buffer()
 		DATABASE = None
+
+	def get_instance[T: Entity](self, type: type[T], id: int) -> T:
+		return self.instances[type][id]
 
 	def flush_buffer(self):
 		with open(self.path, "a", encoding="utf-8") as file:
