@@ -12,9 +12,6 @@ type Primary = None | int | str
 type Extractor[T] = Callable[[T], Primary]
 type Filter[T] = Callable[[T], bool]
 type DatabaseRoutine = Callable[[Database], None]
-type Extractor[T] = Callable[[T], Primary]
-type Filter[T] = Callable[[T], bool]
-type DatabaseRoutine = Callable[[Database], None]
 
 DATABASE: Database | None = None
 NO_ID = -1
@@ -145,7 +142,6 @@ class Database:
 		)
 
 	def buffer_update(self, table: str, id: int, map: dict[str, Primary]):
-		self.append_buffer(
 		self.append_buffer(
 			f"update {table} set {','.join(f"{column}={self.fmt_value(value)}" for column, value in map.items())} where id={id}"
 		)
