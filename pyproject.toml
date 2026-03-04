@@ -5,5 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "arrow>=1.4.0",
     "faker>=40.5.1",
+    "rich>=14.3.3",
 ]

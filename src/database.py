@@ -1,8 +1,9 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from pkgutil import get_data
 import random
-from typing import Any, Callable, Literal, Protocol, Self, Sequence
+from typing import Any, Callable, Iterator, Literal, Protocol, Self, Sequence
 
 from .utils import get_or_create
 
@@ -17,6 +18,27 @@ NO_ID = -1
 
 def anything(value: Any) -> Literal[True]:
 	return True
+
+@dataclass
+class Not[T]:
+	filter: Filter[T]
+
+	def __call__(self, value: T) -> bool:
+		return not self.filter(value)
+
+@dataclass
+class Conjunction[T]:
+	filters: tuple[Filter[T], ...]
+
+	def __call__(self, value: T) -> bool:
+		return all(filter(value) for filter in self.filters)
+
+@dataclass
+class SameEntity[T: Entity]:
+	entity: T
+
+	def __call__(self, entity: T) -> bool:
+		return self.entity.id == entity.id
 
 def get_database() -> Database:
 	if DATABASE is None:
@@ -63,13 +85,14 @@ class Database:
 	storages: dict[type[Entity], dict[int, Entity]] = field(default_factory=dict)
 	max_buffer_size: int = field(default=1_000_000)
 
-	def __enter__(self):
+	def __enter__(self) -> Self:
 		global DATABASE
 
 		with open(self.path, "w", encoding="utf-8") as file:
 			file.write("")
 
 		DATABASE = self
+		return self
 
 	def __exit__(self, exc_type, exc, tb):
 		global DATABASE
@@ -115,7 +138,7 @@ class Database:
 	def buffer_insert(self, table: str, columns: Sequence[str], values: Sequence[Primary]):
 		values = tuple(self.fmt_value(value) for value in values)
 		self.append_buffer(
-			f"insert into {table} ({','.join(columns)} values ({','.join(values)}))"
+			f"insert into {table} ({','.join(columns)}) values ({','.join(values)})"
 		)
 
 	def buffer_update(self, table: str, id: int, map: dict[str, Primary]):
@@ -172,14 +195,22 @@ class Database:
 		
 		raise StateNotSuitable
 
-def create[T: Entity](self, factory: Callable[[], T]) -> Watch[T]:
+	def iter[T: Entity](self, type: type[T], filter: Filter[T] = anything) -> Iterator[T]:
+		storage = self.get_storage(type)
+		entities = tuple(entity for entity in storage.values() if filter(entity))
+		yield from entities
+
+def database_create[T: Entity](self, factory: Callable[[], T]) -> Watch[T]:
 	return get_database().create(factory)
 
-def get[T: Entity](self, type: type[T], id: int) -> Watch[T]:
+def database_get[T: Entity](self, type: type[T], id: int) -> Watch[T]:
 	return get_database().get(type, id)
 
-def pick[T: Entity](self, type: type[T], filter: Filter[T] = anything) -> Watch[T]:
+def database_pick[T: Entity](self, type: type[T], filter: Filter[T] = anything) -> Watch[T]:
 	return get_database().pick(type, filter)
+
+def database_iter[T: Entity](type: type[T], filter: Filter[T] = anything) -> Iterator[T]:
+	yield from get_database().iter(type, filter)
 
 @dataclass(frozen=True)
 class Watch[T: Entity]:
@@ -194,11 +225,30 @@ class Watch[T: Entity]:
 
 @dataclass
 class SimulationStatistics:
-	rountine_run_count: int = field(default=0)
+	rountine_total_count: int = 0
+
+	rountine_batch_size: int = 1
+	rountine_batch_success: int = 0
+
+	def notify_routine_success(self):
+		self.rountine_total_count += 1
+
+		self.rountine_batch_size += 1
+		self.rountine_batch_success += 1
+
+	def notify_routine_failure(self):
+		self.rountine_batch_size += 1
+
+	def get_routine_success_rate(self) -> float:
+		return self.rountine_batch_success / self.rountine_batch_size
+
+	def reset_routine_batch_size(self):
+		self.rountine_batch_size = 1
+		self.rountine_batch_success = 0
 
 @dataclass(frozen=True)
 class Simulation:
-	routines: tuple[DatabaseRoutine, ...] = field(default_factory=tuple)
+	routines: list[DatabaseRoutine] = field(default_factory=list)
 	goal: Filter[Simulation] = field(default=anything)
 	database: Database = field(default_factory=get_database)
 	statistics: SimulationStatistics = field(default_factory=SimulationStatistics)
@@ -208,9 +258,10 @@ class Simulation:
 			rountine(self.database)
 
 		except StateNotSuitable:
+			self.statistics.notify_routine_failure()
 			return
 		
-		self.statistics.rountine_run_count += 1
+		self.statistics.notify_routine_success()
 
 	def run_random_routine(self):
 		self.run_routine(random.choice(self.routines))
